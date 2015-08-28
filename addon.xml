@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.highspots_tv" name="Highspots.TV" version="1.0.0" provider-name="bdlou">
+    <requires>
+		<import addon="xbmc.python" version="2.14.0"/>
+		<import addon="script.module.feedparser" />
+		<import addon="script.module.beautifulsoup"/>
+		<import addon="script.module.t0mm0.common"/>
+	</requires>
+	<extension point="xbmc.python.pluginsource" library="addon.py">
+		<provides>video</provides>
+	</extension>
+	<extension point="xbmc.addon.metadata">
+		<platform>all</platform>
+		<summary lang="en">Highspots.tv</summary>
+		<description lang="en">Highspots on demand.  Wrestling when you want it.  (Requires Highspots.TV subscripton)</description>
+		<license>GNU General Public License, v2</license>
+		<language></language>
+		<forum>http://forum.kodi.tv/showthread.php?tid=xxxxxx</forum>
+		<source>https://github.com/bdlou/plugin.video.highspots_tv</source>
+		<email>software@louismartinez.com</email>
+	</extension>
+</addon>
