@@ -1,10 +1,11 @@
 ﻿import sys
-import urllib, urllib2, re
+import urllib
+import urllib2
+import urlparse
 import xbmc
 import xbmcaddon
 import xbmcgui
 import xbmcplugin
-import os
 import feedparser
 from BeautifulSoup import BeautifulSoup, BeautifulStoneSoup
 from t0mm0.common.net import Net
@@ -16,10 +17,13 @@ import re
 __selfpath__   = xbmcaddon.Addon(id='plugin.video.highspots_tv').getAddonInfo('path')
 lastNum = re.compile(r'(?:[^\d]*(\d+)[^\d]*)+')
 addon = xbmcaddon.Addon()
+_pluginId = 'plugin.video.highspots_tv'
 pluginhandle = int(sys.argv[1])
+args = urlparse.parse_qs(sys.argv[2][1:])
 cookie_jar = settings.cookie_jar()
 USER = settings.username()
 PW = settings.user_password()
+
 
 def parameters_string_to_dict(parameters):
     paramDict = {}
@@ -36,40 +40,30 @@ def translation(id):
     return addon.getLocalizedString(id).encode('utf-8')
 
 
-def geturl(param):
+def gethtmlfromurl(param):  # Returns the html of the provided URL using stored cookies
     net.set_cookies(cookie_jar)
     html = net.http_GET(param).content
     net.save_cookies(cookie_jar)
     return html
 
 
-def playvideo(param):
+def playvideo(param): # Gets the stream from the selected video and plays it
     try:
         stream = gethighspotsstreamurl(param)
-        xbmc.Player().play(stream)
+        listitem = xbmcgui.ListItem(path=stream)
+        xbmcplugin.setResolvedUrl(pluginhandle, True, listitem)
     except:
         xbmcgui.Dialog().ok('Highspots.TV', 'Highspots.TV subscribers you will need to purchase access to view this event.')
 
-def gethighspotsstreamurl(param):
-    link = geturl(param)
+def gethighspotsstreamurl(param): # Returns the stream URL from Highspots.TV for the link passed to the function
+    link = gethtmlfromurl(param)
     soup = BeautifulSoup(link)
     streams = soup.findAll('video')
     stream = streams[-1]['src']
-    print('gethighspotsstreamurl:: returned ' + stream)
     return stream
 
-    #xbmc.Player().play(stream)
 
-    #print(str(stream))
-    #liz = xbmcgui.ListItem(path=stream)
-    #liz = xbmcgui.ListItem(iconImage="DefaultVideo.png")
-    #liz.setProperty('IsPlayable', 'true')
-    #xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=stream,listitem=liz)
-
-
-
-def login():
-    print("login:: called")
+def login(): # Attempts to log in to Highspots.TV with the username and password the user supplies in the addon's settings
     header_dict = {}
     header_dict['Accept'] = '	text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     header_dict['Host'] = 'highspots.tv'
@@ -80,16 +74,12 @@ def login():
     form_data = ({'log' : USER, 'pwd' : PW, 'wp-submit' : 'Log+In', 'redirect_to' : 'http%3A%2F%2Fhighspots.tv%2Fwp-admin%2F', 'testcookie' : '1'})
     net.set_cookies(cookie_jar)
     login = net.http_POST('http://highspots.tv/wp-login.php', form_data=form_data, headers=header_dict).content
-    #if USER in login and USER !='':
-    #    notification('Highspots.tv', 'Logged in to Highspots.tv', '3000', xbmc.translatePath(os.path.join('special://home/addons/plugin.video.highspots.tv', 'icon.png')))
     net.save_cookies(cookie_jar)
 
 
-def getfeed(param):
-    print('getfeed:: ' + param)
-
+def getfeed(param): # Gets the RSS feed passed and creates video links for each result, then adds a Search option
     try:
-        html = geturl(param)
+        html = gethtmlfromurl(param)
         feed = feedparser.parse(html)
 
         for item in feed['items']:
@@ -100,12 +90,10 @@ def getfeed(param):
                 base, id = item.id.split('=')
                 thumb = 'http://highspots.tv/wp-content/thumbnails/{0}.jpg'.format(id)
                 liz = xbmcgui.ListItem(name, iconImage="DefaultVideo.png", thumbnailImage=thumb)
-                decodedString = unicode(BeautifulStoneSoup(item.description,convertEntities=BeautifulStoneSoup.HTML_ENTITIES ))
+                decodedString = BeautifulStoneSoup(item.description, convertEntities=BeautifulStoneSoup.ALL_ENTITIES).contents[0]
                 liz.setInfo(type="Video", infoLabels={"Title": item.title, "Plot": decodedString})
                 liz.setProperty('IsPlayable', 'true')
-                #stream_url = getstreamurl(item.link)
-                addDir(name, item.link, 'playvideo' ,thumb, decodedString)
-                #xbmcplugin.addDirectoryItem(handle=addon_handle, url=stream_url, listitem=li)
+                addLink(name, item.link, 'playvideo' ,thumb, decodedString)
             except:
                 pass
         try:
@@ -122,8 +110,8 @@ def getfeed(param):
     except urllib2.HTTPError:
         xbmc.executebuiltin("XBMC.Notification(Highspots.TV, There are no more results for this category, '5000', %s)" % ( __selfpath__ + '/icon.png'))
 
-def increment(s):
-    """ look for the last sequence of number(s) in a string and increment """
+
+def increment(s): # Function that looks at the last sequence of number(s) in a string and increments it by 1
     m = lastNum.search(s)
     if m:
         next = str(int(m.group(1))+1)
@@ -131,7 +119,8 @@ def increment(s):
         s = s[:max(end-len(next), start)] + next + s[end:]
     return s
 
-def searchquery():
+
+def searchquery(): # Searches Highspots.TV for the user's query then lists the results from the parsed RSS
     keyboard = xbmc.Keyboard('', translation(30017))
     keyboard.doModal()
     if keyboard.isConfirmed() and keyboard.getText():
@@ -140,16 +129,29 @@ def searchquery():
         getfeed(queryurl)
 
 
-def addDir(name, url, mode, iconimage='', plot=''):
+def addLink(name, url, mode, iconimage, desc, length="", date="", nr=""): # Creates playable links for the videos listed
+    u = sys.argv[0]+"?url="+urllib.quote_plus(url)+"&mode="+str(mode)
+    ok = True
+    liz = xbmcgui.ListItem(name, iconImage="DefaultVideo.png", thumbnailImage=iconimage)
+    liz.setInfo(type="Video", infoLabels={"Title": name, "Plot": desc, "Aired": date, "Episode": nr})
+    if length:
+        liz.addStreamInfo('video', {'duration': int(length)})
+    liz.setProperty('IsPlayable', 'true')
+    ok = xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=u, listitem=liz)
+    return ok
+
+
+
+def addDir(name, url, mode, iconimage='', plot=''): # Creates a directory list
     u = sys.argv[0]+"?url="+urllib.quote_plus(url)+"&mode="+str(mode)
     ok=True
     liz=xbmcgui.ListItem(name, iconImage="DefaultFolder.png", thumbnailImage=iconimage)
     liz.setInfo(type="Video", infoLabels={ "Title": name, "plot": plot})
     ok=xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=u,listitem=liz,isFolder=True)
+    return ok
 
 
-def listCategories():
-    nextpage = 1
+def listCategories(): # The default view for the addon.  Lists all of the available top level RSS feeds on Highspots.TV.  Adds a search option.
     addDir('Free Videos', 'http://highspots.tv/category/video/free-videos/feed/', 'category')
     addDir('Matches', 'http://highspots.tv/category/video/wrestling-matches/feed/', 'category')
     addDir('Originals', 'http://highspots.tv/category/video/highspots-originals/feed/', 'category')
@@ -160,7 +162,6 @@ def listCategories():
     addDir('iPPV', 'http://highspots.tv/category/video/ippv/feed/', 'category')
     addDir('Search', '', 'search')
     xbmcplugin.endOfDirectory(pluginhandle)
-    #return
 
 params = parameters_string_to_dict(sys.argv[2])
 mode = urllib.unquote_plus(params.get('mode', ''))
@@ -168,45 +169,16 @@ url = urllib.unquote_plus(params.get('url', ''))
 type = urllib.unquote_plus(params.get('type', ''))
 name = urllib.unquote_plus(params.get('name', ''))
 
-print('Mode: ' + str(mode))
-print('URL : ' + str(url))
-print('Type: ' + str(type))
-print('Name: ' + str(name))
-
 if mode == 'category':
     getfeed(url)
-    login()
 elif mode == 'playvideo':
-    print(str(url))
-    playvideo(url)
+    link = args.get('url')[0] # Gets the URL out of the query string to pass to playvideo
+    playvideo(link)
 elif mode == 'search':
     searchquery()
 else:
+    try:
+        login()
+    except:
+        pass
     listCategories()
-
-# posts = []
-# for i in range(0,len(feed['entries'])):
-#     posts.append({
-#         'title': feed['entries'][i].title,
-#         'description': feed['entries'][i].summary,
-#         'url': feed['entries'][i].link,
-#     })
-#
-# for item in feed['items']:
-#     print item
-#     addon_handle = int(sys.argv[1])
-#     xbmcplugin.setContent(addon_handle, 'video')
-#     name = item.title
-#     li = xbmcgui.ListItem(name, iconImage='')
-#     xbmcplugin.addDirectoryItem(handle=addon_handle, url=item.link, listitem=li)
-
-#addon_handle = int(sys.argv[1])
-
-#xbmcplugin.setContent(addon_handle, 'video')
-
-#name = 'Adam Cole & Jessicka Havok vs. Sami Callihan & Lufisto'
-#li = xbmcgui.ListItem(name, iconImage='http://highspots.tv/wp-content/thumbnails/6923.jpg')
-#url = 'rtmp://s2zv340p5zpqre.cloudfront.net:1935/cfx/st/mp4:tv/mixed-tag-czw-14th-020913.mp4'
-#xbmcplugin.addDirectoryItem(handle=addon_handle, url=url, listitem=li)
-
-#xbmcplugin.endOfDirectory(pluginhandle)
